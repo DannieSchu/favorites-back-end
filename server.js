@@ -8,20 +8,16 @@ const morgan = require('morgan');
 const client = require('./lib/client');
 const request = require('superagent');
 
-// Initiate database connection
-client.connect();
-
 // Application Setup
 const app = express();
 const PORT = process.env.PORT;
 app.use(morgan('dev'));
 app.use(cors());
 app.use(express.static('public'));
-app.use(express.json());
 
 // API Routes
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 
 // *** AUTH ***
 const createAuthRoutes = require('./lib/auth/create-auth-routes');
@@ -50,20 +46,70 @@ app.use('/api/auth', authRoutes);
 
 const ensureAuth = require('./lib/auth/ensure-auth');
 
-app.use('/api', ensureAuth);
+app.use('/api/me', ensureAuth);
 
-// app.get('/api/goodreads', async (req, res) => {
-//     const URL = `https://www.goodreads.com/search/index.xml?key=${process.env.GOODREADS_API_KEY}&q=${req.query.search}`;
-//     const result = await request.get(URL);
-//     res.json(result.body);
-// });
-
-app.get('/api/tiingo', async (req, res) => {
-    const URL = `https://api.tiingo.com/tiingo/daily/${req.query.search}?token=${process.env.TIINGO_API_KEY}`;
-    const result = await request.get(URL);
-    res.json(result.body);
+// API routes
+app.get('/api/news', async(req, res) => {
+    const URL = `http://newsapi.org/v2/top-headlines?q=${req.query.search}&apiKey=${process.env.NEWS_API_KEY}`;
+    const data = await request.get(URL);
+    const articlesArr = data.body.articles;
+    const articles = articlesArr.map(article => {
+        return {
+            title: article.title,
+            source: article.source.name,
+            url: article.url
+        };
+    });
+    res.json(articles);
 });
+
+app.get('/api/me/favorites', async(req, res) => {
+    try {
+        const favorites = await client.query(`
+        SELECT * from favorites 
+        WHERE user_id = $1;`,
+        [req.userId]
+        );
+        res.json(favorites.rows);
+    }
+    catch (err) {
+        console.error(err);
+    }
+});
+
+app.delete('api/me/favorites/:id', async(req, res) => {
+    try {
+        const deletedFavorite = await client.query(`
+        DELETE FROM favorites
+        WHERE id = $1
+        RETURNING *;`,
+        [req.params.id]
+        );
+        res.json(deletedFavorite.rows);
+    }
+    catch (err) {
+        console.error(err);
+    }
+});
+
+app.post('api/me/favorites', async(req, res) => {
+    try {
+        const newFavorite = await client.query(`
+        INSERT INTO favorites (title, source, url, user_id)
+        VALUES ($1, $2, $3, $4)
+        RETURNING *;`,
+        [req.body.title, req.body.source, req.body.url, req.user.id]
+        );
+        res.json(newFavorite[0].row);
+    }
+    catch (err) {
+        console.error(err);
+    }
+});
+
 
 app.listen(PORT, () => {
     console.log('listening at ', PORT);
 });
+
+module.exports = { app };
